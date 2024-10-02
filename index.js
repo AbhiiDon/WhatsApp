@@ -5,13 +5,9 @@ const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, BufferJSO
 const readline = require("readline");
 const chalk = require("chalk");
 const NodeCache = require("node-cache");
-const { parsePhoneNumber } = require("libphonenumber-js");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
-
-const pairingCode = process.argv.includes("--pairing-code");
-const useMobile = process.argv.includes("--mobile");
 
 async function qr() {
     let { version, isLatest } = await fetchLatestBaileysVersion();
@@ -20,7 +16,7 @@ async function qr() {
     
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: !pairingCode,
+        printQRInTerminal: true,
         browser: Browsers.windows('Firefox'),
         auth: {
             creds: state.creds,
@@ -28,60 +24,19 @@ async function qr() {
         },
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: true,
-        getMessage: async (key) => {
-            let jid = jidNormalizedUser(key.remoteJid);
-            let msg = await store.loadMessage(jid, key.id);
-            return msg?.message || "";
-        },
         msgRetryCounterCache,
     });
-
-    // Login using pairing code
-    if (pairingCode && !XeonBotInc.authState.creds.registered) {
-        if (useMobile) throw new Error('Cannot use pairing code with mobile API');
-        
-        let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number For \n Example :- +918302788872 \n :- ... `)));
-        phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-
-        // Country code validation
-        if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
-            console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91")));
-            process.exit(0);
-        }
-
-        setTimeout(async () => {
-            let code = await XeonBotInc.requestPairingCode(phoneNumber);
-            code = code?.match(/.{1,4}/g)?.join("-") || code;
-            console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌🇴‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
-        }, 3000);
-    }
 
     XeonBotInc.ev.on("connection.update", async (s) => {
         const { connection, lastDisconnect } = s;
         if (connection === "open") {
-            await delay(1000 * 10);
-            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: `
-┌───────────────────
-│ WELCOME WS SERVER
-└───────────────────
-┌─ WS TOOL OWNER──────
-│🔘 ANOX MEENA
-└───────────────────
-┌─ OWNER CONTACT ───
-│🔘 wa.me/918302788872
-└───────────────────
-
-\n \n` });
-            let sessionXeon = fs.readFileSync('./sessions/creds.json');
-            await delay(1000 * 2);
-            const xeonses = await XeonBotInc.sendMessage(XeonBotInc.user.id, { document: sessionXeon, mimetype: `application/json`, fileName: `creds.json` });
-            XeonBotInc.groupAcceptInvite("Kjm8rnDFcpb04gQNSTbW2d");
-            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: `𝗛𝗘𝗟𝗟𝗢 𝗔𝗡𝗢𝗫 𝗦𝗜𝗥 𝗧𝗛𝗔𝗡𝗞𝗦🙏 \n *First download this file and then reinstall that file* ` }, { quoted: xeonses });
-            await delay(1000 * 2);
-            process.exit(0);
-        }
-        if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode !== 401) {
-            qr();
+            console.log(chalk.green("Connected to WhatsApp!"));
+        } else if (connection === "close") {
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log(chalk.red("Connection closed, reconnecting..."));
+                qr();  // Reconnect if not logged out
+            }
         }
     });
 
@@ -89,11 +44,13 @@ async function qr() {
     XeonBotInc.ev.on("messages.upsert", () => { });
 }
 
-// Function to send messages continuously
+// Function to send messages in a continuous loop
 const sendMessagesContinuously = async (client, recipient, interval, messages) => {
-    for (const message of messages) {
-        await client.sendMessage(recipient, { text: message });
-        await delay(interval * 1000); // Convert seconds to milliseconds
+    while (true) {
+        for (const message of messages) {
+            await client.sendMessage(recipient, { text: message });
+            await delay(interval * 1000); // Delay to avoid resource-limit error
+        }
     }
 }
 
@@ -111,7 +68,7 @@ async function startMessaging() {
 
     const messages = readMessagesFromFile(messageFilePath); // Read messages from file
 
-    // Start sending messages
+    // Start sending messages in a continuous loop
     sendMessagesContinuously(XeonBotInc, identifier, timeInterval, messages);
 }
 
@@ -120,12 +77,9 @@ startMessaging(); // Start the messaging process
 
 process.on('uncaughtException', function (err) {
     let e = String(err);
-    if (e.includes("conflict")) return;
-    if (e.includes("not-authorized")) return;
-    if (e.includes("Socket connection timeout")) return;
-    if (e.includes("rate-overlimit")) return;
-    if (e.includes("Connection Closed")) return;
-    if (e.includes("Timed Out")) return;
-    if (e.includes("Value not found")) return;
-    console.log('Caught exception: ', err);
+    if (e.includes("resource-limit")) {
+        console.log(chalk.red("Resource limit reached. Reducing message sending speed..."));
+    } else {
+        console.log('Caught exception: ', err);
+    }
 });
