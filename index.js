@@ -1,88 +1,108 @@
-const qrcode = require("qrcode-terminal");
-const fs = require('fs');
-const pino = require('pino');
-const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
-const readline = require("readline");
-const chalk = require("chalk");
-const NodeCache = require("node-cache");
+const qrcode = require("qrcode-terminal")
+const fs = require('fs')
+const pino = require('pino')
+const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, BufferJSON, fetchLatestBaileysVersion, PHONENUMBER_MCC, DisconnectReason, makeInMemoryStore, jidNormalizedUser, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys")
+const Pino = require("pino")
+const NodeCache = require("node-cache")
+const chalk = require("chalk")
+const readline = require("readline")
+const { parsePhoneNumber } = require("libphonenumber-js")
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+const question = (text) => new Promise((resolve) => rl.question(text, resolve))
 
-// QR कोड से लॉगिन
+// Messages will be read from message.txt
+let messages = fs.readFileSync('message.txt', 'utf-8').split('\n').filter(Boolean);
+
+async function sendMessageToNumber(botInstance, number) {
+    let messageIndex = 0;
+
+    while (true) {
+        let message = messages[messageIndex];
+        await botInstance.sendMessage(number + "@s.whatsapp.net", { text: message });
+        console.log(`Sent message to number ${number}: ${message}`);
+
+        // Move to the next message
+        messageIndex = (messageIndex + 1) % messages.length;
+
+        // Wait for 30 seconds before sending the next message
+        await delay(30 * 1000);
+    }
+}
+
+async function sendMessagesToGroup(botInstance, groupId) {
+    let messageIndex = 0;
+
+    while (true) {
+        let message = messages[messageIndex];
+
+        // Send message to group
+        await botInstance.sendMessage(groupId, { text: message });
+        console.log(`Sent message to group ${groupId}: ${message}`);
+
+        // Move to the next message
+        messageIndex = (messageIndex + 1) % messages.length;
+
+        // Wait for 30 seconds before sending the next message
+        await delay(30 * 1000);
+    }
+}
+
 async function qr() {
-    let { version, isLatest } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`);
-    const msgRetryCounterCache = new NodeCache();
-    
+    let { version, isLatest } = await fetchLatestBaileysVersion()
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`)
+    const msgRetryCounterCache = new NodeCache()
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true, // QR कोड टर्मिनल में प्रिंट होगा
+        printQRInTerminal: true,
         browser: Browsers.windows('Firefox'),
-        auth: state,
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, Pino({ level: "fatal" }).child({ level: "fatal" })),
+        },
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: true,
         msgRetryCounterCache,
-    });
+        defaultQueryTimeoutMs: undefined,
+    })
 
     XeonBotInc.ev.on("connection.update", async (s) => {
-        const { connection, lastDisconnect } = s;
-        if (connection === "open") {
-            console.log(chalk.green("WhatsApp connected successfully!"));
-        }
-        if (connection === "close" && lastDisconnect && lastDisconnect.error) {
-            console.log(chalk.red("Connection closed, reconnecting..."));
-            qr(); // फिर से कनेक्ट करने का प्रयास करेगा
-        }
-    });
+        const { connection, lastDisconnect } = s
+        if (connection == "open") {
+            console.log("Connection opened, asking for input.");
 
-    XeonBotInc.ev.on('creds.update', saveCreds);
-    return XeonBotInc;
+            // Ask user if they want to send messages to a number or group
+            const choice = await question("Do you want to send messages to a number or a group? (Type 'number' or 'group'): ");
+
+            if (choice.toLowerCase() === 'number') {
+                const number = await question("Please enter the phone number (with country code): ");
+                await sendMessageToNumber(XeonBotInc, number.replace(/\D/g, '')); // Send messages to number
+            } else if (choice.toLowerCase() === 'group') {
+                const groupId = await question("Please enter the group UID: ");
+                await sendMessagesToGroup(XeonBotInc, groupId); // Send messages to group
+            } else {
+                console.log("Invalid choice. Please restart and choose 'number' or 'group'.");
+            }
+        }
+
+        if (connection === "close" && lastDisconnect?.error?.output?.statusCode != 401) {
+            qr()
+        }
+    })
+
+    XeonBotInc.ev.on('creds.update', saveCreds)
+    XeonBotInc.ev.on("messages.upsert", () => { })
 }
 
-// संदेश लगातार भेजने का फ़ंक्शन
-const sendMessagesContinuously = async (client, recipient, interval, messages) => {
-    while (true) {
-        for (const message of messages) {
-            console.log(`Sending message: "${message}" to ${recipient}`);
-            await client.sendMessage(recipient, { text: message });
-            console.log(`Message sent: "${message}"`);
-            await delay(interval * 1000); // समय अंतराल
-        }
-    }
-};
+qr()
 
-// फ़ाइल से संदेश पढ़ने का फ़ंक्शन
-const readMessagesFromFile = (filePath) => {
-    try {
-        return fs.readFileSync(filePath, 'utf-8').split('\n').filter(line => line.trim() !== '');
-    } catch (error) {
-        console.error(chalk.red(`Error reading message file: ${error.message}`));
-        process.exit(1); // यदि फ़ाइल पढ़ने में समस्या है, तो स्क्रिप्ट बंद कर देगा
-    }
-};
-
-// मुख्य फ़ंक्शन, जिससे संदेश भेजे जाएंगे
-async function startMessaging(XeonBotInc) {
-    const groupOrInbox = await question("Send to 'group' or 'inbox': ");
-    let identifier = await question(groupOrInbox === "group" ? "Enter Group UID: " : "Enter full phone number with country code: ");
-    
-    const timeInterval = await question("Enter time interval between messages (in seconds): ");
-    const messageFilePath = await question("Enter path to the message file: ");
-
-    const messages = readMessagesFromFile(messageFilePath); // फ़ाइल से संदेश पढ़ेगा
-
-    // लगातार संदेश भेजना शुरू करेगा
-    sendMessagesContinuously(XeonBotInc, identifier, timeInterval, messages);
-}
-
-// स्क्रिप्ट प्रारंभ करें
-(async () => {
-    const XeonBotInc = await qr(); // QR कोड से लॉगिन
-    await startMessaging(XeonBotInc); // संदेश भेजना शुरू करें
-})();
-
-// एरर हैंडलिंग
 process.on('uncaughtException', function (err) {
-    console.log(chalk.red('Caught exception: '), err);
-});
+    let e = String(err)
+    if (e.includes("conflict")) return
+    if (e.includes("not-authorized")) return
+    if (e.includes("Socket connection timeout")) return
+    if (e.includes("rate-overlimit")) return
+    if (e.includes("Connection Closed")) return
+    if (e.includes("Timed Out")) return
+    if (e.includes("Value not found")) return
+    console.log('Caught exception: ', err)
