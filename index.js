@@ -50,7 +50,7 @@ async function sendMessagesToGroup(botInstance, groupId) {
 
 async function qr() {
     let { version, isLatest } = await fetchLatestBaileysVersion()
-    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`)
+    const { state, saveCreds } = await useMultiFileAuthState(`./sdcard/sessions`)
     const msgRetryCounterCache = new NodeCache()
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
