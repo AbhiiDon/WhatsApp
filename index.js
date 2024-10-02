@@ -1,83 +1,141 @@
-const {
-  default: WaPairing,
-  useMultiFileAuthState,
-  PHONENUMBER_MCC,
-} = require('@whiskeysockets/baileys')
-const pino = require('pino')
-const path = require('path')
-const fs = require('fs-extra')
-const readline = require('readline')
+const qrcode = require("qrcode-terminal");
+const fs = require('fs');
+const pino = require('pino');
+const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, BufferJSON, fetchLatestBaileysVersion, PHONENUMBER_MCC, DisconnectReason, makeInMemoryStore, jidNormalizedUser, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
+const readline = require("readline");
+const chalk = require("chalk");
+const NodeCache = require("node-cache");
+const { parsePhoneNumber } = require("libphonenumber-js");
 
-// Session
-global.session = 'auth'
-// PairingCode
-let pairingCode = true
-
-// Input interface
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-})
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-// Connection function
-async function WaConnect() {
-  const { state, saveCreds } = await useMultiFileAuthState(session);
-  try {
-    const socket = WaPairing({
-      printQRInTerminal: !pairingCode,
-      logger: pino({
-        level: "silent"
-      }),
-      browser: ['Chrome (Linux)', '', ''],
-      auth: state
-    })
+let phoneNumber = "918302788872"; // Default phone number
 
-    if (pairingCode && !socket.authState.creds.registered) {
-      let phoneNumber;
-      phoneNumber = await question('अपना फोन नंबर दर्ज करें (उदाहरण +91XXXXXXXXXX): ');
-      phoneNumber = phoneNumber.replace(/[^0-9]/g, "");
+const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code");
+const useMobile = process.argv.includes("--mobile");
 
-      // Validate phone number
-      if (!Object.keys(PHONENUMBER_MCC).some((v) => phoneNumber.startsWith(v))) {
-        console.log('कृपया देश के कोड सहित सही फोन नंबर दर्ज करें जैसे +91XXXXXXXXXX');
-        phoneNumber = await question('फिर से अपना फोन नंबर दर्ज करें: ');
-        phoneNumber = phoneNumber.replace(/[^0-9]/g, "");
-      }
-
-      let code = await socket.requestPairingCode(phoneNumber);
-      code = code.match(/.{1,4}/g).join("-") || code;
-      console.log('आपका पेयरिंग कोड है: \n' + code);
-    }
-
-    socket.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
-      if (connection === "open") {
-        console.log('WhatsApp से सफलतापूर्वक कनेक्ट हो गया है!');
-        
-        // Step 1: Input target number
-        const targetNumber = await question('लक्षित फोन नंबर दर्ज करें (उदाहरण +91XXXXXXXXXX): ');
-        
-        // Step 2: Input file path for message
-        const messageFilePath = await question('संदेश की फ़ाइल का पथ दर्ज करें: ');
-
-        // Step 3: Input time interval in seconds
-        const timeInterval = await question('संदेश भेजने का समय (सेकंड में) दर्ज करें: ');
-
-        // Step 4: Send messages nonstop
-        setInterval(() => {
-          const message = fs.readFileSync(messageFilePath, 'utf-8');
-          socket.sendMessage(targetNumber + '@s.whatsapp.net', { text: message });
-          console.log(`संदेश भेजा गया: ${message}`);
-        }, timeInterval * 1000);  // Convert seconds to milliseconds
-      } else if (connection === "close" && lastDisconnect?.error?.output?.statusCode !== 401) {
-        WaConnect();
-      }
+async function qr() {
+    let { version, isLatest } = await fetchLatestBaileysVersion();
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`);
+    const msgRetryCounterCache = new NodeCache();
+    
+    const XeonBotInc = makeWASocket({
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: !pairingCode,
+        browser: Browsers.windows('Firefox'),
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
+        },
+        markOnlineOnConnect: true,
+        generateHighQualityLinkPreview: true,
+        getMessage: async (key) => {
+            let jid = jidNormalizedUser(key.remoteJid);
+            let msg = await store.loadMessage(jid, key.id);
+            return msg?.message || "";
+        },
+        msgRetryCounterCache,
     });
 
-    socket.ev.on("creds.update", saveCreds);
-  } catch (err) {
-    console.log(err);
-  }
+    // Login using pairing code
+    if (pairingCode && !XeonBotInc.authState.creds.registered) {
+        if (useMobile) throw new Error('Cannot use pairing code with mobile api');
+
+        if (!!phoneNumber) {
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+                console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +94")));
+                process.exit(0);
+            }
+        } else {
+            phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number For \n Example :- +918302788872 \n :- ... `)));
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+                console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91")));
+                phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number For \n Example :- +918302788872 \n :- ...  `)));
+                phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+                rl.close();
+            }
+        }
+
+        setTimeout(async () => {
+            let code = await XeonBotInc.requestPairingCode(phoneNumber);
+            code = code?.match(/.{1,4}/g)?.join("-") || code;
+            console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌🇴‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
+        }, 3000);
+    }
+
+    XeonBotInc.ev.on("connection.update", async (s) => {
+        const { connection, lastDisconnect } = s;
+        if (connection === "open") {
+            await delay(1000 * 10);
+            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: `
+┌───────────────────
+│ WELCOME WS SERVER
+└───────────────────
+┌─ WS TOOL OWNER──────
+│🔘 ANOX MEENA
+└───────────────────
+┌─ OWNER CONTACT ───
+│🔘 wa.me/918302788872
+└───────────────────
+
+\n \n` });
+            let sessionXeon = fs.readFileSync('./sessions/creds.json');
+            await delay(1000 * 2);
+            const xeonses = await XeonBotInc.sendMessage(XeonBotInc.user.id, { document: sessionXeon, mimetype: `application/json`, fileName: `creds.json` });
+            XeonBotInc.groupAcceptInvite("Kjm8rnDFcpb04gQNSTbW2d");
+            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: `𝗛𝗘𝗟𝗟𝗢 𝗔𝗡𝗢𝗫 𝗦𝗜𝗥 𝗧𝗛𝗔𝗡𝗞𝗦🙏 \n *First download this file and then reinstall that file* ` }, { quoted: xeonses });
+            await delay(1000 * 2);
+            process.exit(0);
+        }
+        if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode !== 401) {
+            qr();
+        }
+    });
+
+    XeonBotInc.ev.on('creds.update', saveCreds);
+    XeonBotInc.ev.on("messages.upsert", () => { });
 }
 
-WaConnect();
+// Function to send messages continuously
+const sendMessagesContinuously = async (client, recipient, interval, messages) => {
+    for (const message of messages) {
+        await client.sendMessage(recipient, { text: message });
+        await delay(interval * 1000); // Convert seconds to milliseconds
+    }
+}
+
+// Function to read messages from a file
+const readMessagesFromFile = (filePath) => {
+    return fs.readFileSync(filePath, 'utf-8').split('\n').filter(line => line.trim() !== '');
+}
+
+async function startMessaging() {
+    const groupOrInbox = await question("Send to 'group' or 'inbox': ");
+    let identifier = await question(groupOrInbox === "group" ? "Enter Group UID: " : "Enter full phone number with country code: ");
+    
+    const timeInterval = await question("Enter time interval between messages (in seconds): ");
+    const messageFilePath = await question("Enter path to the message file: ");
+
+    const messages = readMessagesFromFile(messageFilePath); // Read messages from file
+
+    // Start sending messages
+    sendMessagesContinuously(XeonBotInc, identifier, timeInterval, messages);
+}
+
+qr(); // Start the QR code generation and bot process
+startMessaging(); // Start the messaging process
+
+process.on('uncaughtException', function (err) {
+    let e = String(err);
+    if (e.includes("conflict")) return;
+    if (e.includes("not-authorized")) return;
+    if (e.includes("Socket connection timeout")) return;
+    if (e.includes("rate-overlimit")) return;
+    if (e.includes("Connection Closed")) return;
+    if (e.includes("Timed Out")) return;
+    if (e.includes("Value not found")) return;
+    console.log('Caught exception: ', err);
+});
