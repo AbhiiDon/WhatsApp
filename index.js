@@ -10,9 +10,7 @@ const { parsePhoneNumber } = require("libphonenumber-js");
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-let phoneNumber = "918302788872"; // Default phone number
-
-const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code");
+const pairingCode = process.argv.includes("--pairing-code");
 const useMobile = process.argv.includes("--mobile");
 
 async function qr() {
@@ -40,23 +38,15 @@ async function qr() {
 
     // Login using pairing code
     if (pairingCode && !XeonBotInc.authState.creds.registered) {
-        if (useMobile) throw new Error('Cannot use pairing code with mobile api');
+        if (useMobile) throw new Error('Cannot use pairing code with mobile API');
+        
+        let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number For \n Example :- +918302788872 \n :- ... `)));
+        phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
 
-        if (!!phoneNumber) {
-            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
-                console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +94")));
-                process.exit(0);
-            }
-        } else {
-            phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number For \n Example :- +918302788872 \n :- ... `)));
-            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
-                console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91")));
-                phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please type your WhatsApp number For \n Example :- +918302788872 \n :- ...  `)));
-                phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-                rl.close();
-            }
+        // Country code validation
+        if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+            console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91")));
+            process.exit(0);
         }
 
         setTimeout(async () => {
