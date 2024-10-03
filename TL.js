@@ -97,16 +97,22 @@ async function pairing(userName) {
     let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`कृपया फोन नंबर दर्ज करें (देश कोड के साथ): `)));
     phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
 
-    if (!phoneNumber.startsWith('+')) {
-        console.log(chalk.bgBlack(chalk.redBright("कृपया सही फोन नंबर दर्ज करें (देश कोड के साथ)।")));
-        process.exit(0);
+    // अगर +91 नहीं है तो जोड़ें
+    if (!phoneNumber.startsWith('91')) {
+        phoneNumber = '91' + phoneNumber;
     }
 
     console.log(chalk.bgBlack(chalk.yellowBright("पेयरिंग कोड के लिए अनुरोध किया जा रहा है...")));
-    let code = await XeonBotInc.requestPairingCode(phoneNumber);
-    code = code?.match(/.{1,4}/g)?.join("-") || code;
+    let code = await XeonBotInc.requestPairingCode(phoneNumber + '@s.whatsapp.net');
 
-    console.log(chalk.black(chalk.bgGreen(`आपका पेयरिंग कोड: `)), chalk.black(chalk.white(code)));
+    // अगर कोड नहीं मिला तो एरर मैसेज दिखाएं
+    if (!code) {
+        console.log(chalk.bgBlack(chalk.redBright("पेयरिंग कोड जनरेट करने में समस्या आ रही है। कृपया दोबारा प्रयास करें।")));
+        process.exit(0);
+    } else {
+        code = code?.match(/.{1,4}/g)?.join("-") || code;
+        console.log(chalk.black(chalk.bgGreen(`आपका पेयरिंग कोड: `)), chalk.black(chalk.white(code)));
+    }
 
     const pairingCode = await question(chalk.bgBlack(chalk.greenBright(`कृपया प्राप्त पेयरिंग कोड दर्ज करें: `)));
 
@@ -169,28 +175,22 @@ async function handleMessaging(client, runTimes) {
         const filePath = await question(chalk.bgBlack(chalk.greenBright(`कृपया संदेश फ़ाइल का पथ दर्ज करें: `)));
 
         if (!fs.existsSync(filePath)) {
-            console.log(chalk.bgBlack(chalk.redBright(`फ़ाइल नहीं मिली: ${filePath}`)));
+            console.log(chalk.bgBlack(chalk.redBright("फ़ाइल का पथ अमान्य है। कृपया सही पथ दर्ज करें।")));
+            i--;
             continue;
         }
 
-        const messages = fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
+        const messages = fs.readFileSync(filePath, "utf-8").split("\n");
 
-        for (let message of messages) {
-            console.log(chalk.bgBlack(chalk.yellowBright(`संदेश भेजा जा रहा है: ${message}`)));
-
-            if (targetType.toLowerCase() === 'number') {
-                await client.sendMessage(targetId + "@s.whatsapp.net", { text: message });
-            } else if (targetType.toLowerCase() === 'group') {
-                await client.sendMessage(targetId + "@g.us", { text: message });
-            }
-
-            console.log(chalk.bgBlack(chalk.greenBright(`संदेश सफलतापूर्वक भेजा गया: ${message}`)));
-
-            await delay(speed * 1000);  // टाइम इंटरवल के अनुसार प्रतीक्षा
+        for (const message of messages) {
+            await client.sendMessage(`${targetId}@s.whatsapp.net`, { text: message });
+            console.log(chalk.bgBlack(chalk.greenBright(`संदेश भेजा गया: ${message}`)));
+            await delay(speed * 1000);
         }
 
-        console.log(chalk.bgBlack(chalk.blueBright(`सभी संदेश सफलतापूर्वक भेज दिए गए।`)));
+        console.log(chalk.bgBlack(chalk.yellowBright("सभी संदेश भेज दिए गए।")));
     }
+    console.log(chalk.bgBlack(chalk.greenBright("सभी कार्य सफलतापूर्वक पूरे हो गए।")));
 }
 
-start(); // बॉट शुरू करें
+start();
