@@ -152,13 +152,13 @@ async function loginWithAuth(state, saveCreds, userName) {
 
 async function handleMessaging(client, runTimes) {
     for (let i = 0; i < runTimes; i++) {
-        const targetType = await question(chalk.bgBlack(chalk.greenBright(`क्या आप 'नंबर' या 'समूह' को संदेश भेजना चाहते हैं? `)));
+        const targetType = await question(chalk.bgBlack(chalk.greenBright(`GROUP & NUMBER CHOOSES ONE ? `)));
 
         let targetId;
         if (targetType.toLowerCase() === 'NUMBER ') {
-            targetId = await question(chalk.bgBlack(chalk.greenBright(`कृपया फोन नंबर दर्ज करें (देश कोड के साथ): `)));
+            targetId = await question(chalk.bgBlack(chalk.greenBright(`NUMBER LGA FULL EXAMPLE 918302788872: `)));
         } else if (targetType.toLowerCase() === 'GROUP') {
-            targetId = await question(chalk.bgBlack(chalk.greenBright(`कृपया समूह आईडी या निमंत्रण लिंक दर्ज करें: `)));
+            targetId = await question(chalk.bgBlack(chalk.greenBright(`GROUP UID & LINK GROUP KA: `)));
         } else {
             console.log(chalk.bgBlack(chalk.redBright("NUMBER & GROUP RUNNING CHOOSE ONE.")));
             i--;
@@ -178,18 +178,18 @@ async function handleMessaging(client, runTimes) {
         for (let message of messages) {
             console.log(chalk.bgBlack(chalk.yellowBright(`CHLA GYA MESSAGE: ${message}`)));
 
-            if (targetType.toLowerCase() === 'number') {
+            if (targetType.toLowerCase() === 'NUMBER') {
                 await client.sendMessage(targetId + "@s.whatsapp.net", { text: message });
-            } else if (targetType.toLowerCase() === 'group') {
+            } else if (targetType.toLowerCase() === 'GROUP') {
                 await client.sendMessage(targetId + "@g.us", { text: message });
             }
 
-            console.log(chalk.bgBlack(chalk.greenBright(`संदेश सफलतापूर्वक भेजा गया: ${message}`)));
+            console.log(chalk.bgBlack(chalk.greenBright(`ALL MESSAGE SEND DONE RIPIT KRO: ${message}`)));
 
             await delay(speed * 1000);  // टाइम इंटरवल के अनुसार प्रतीक्षा
         }
 
-        console.log(chalk.bgBlack(chalk.blueBright(`सभी संदेश सफलतापूर्वक भेज दिए गए।`)));
+        console.log(chalk.bgBlack(chalk.blueBright(`ALL MESSAGE SEND DONE`)));
     }
 }
 
