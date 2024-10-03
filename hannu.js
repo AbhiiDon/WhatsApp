@@ -1,78 +1,18 @@
-const qrcode = require("qrcode-terminal");
-const fs = require('fs');
-const pino = require('pino');
-const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
-const NodeCache = require("node-cache");
-const chalk = require("chalk");
+const fs = require("fs");
+const pino = require("pino");
+const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, PHONENUMBER_MCC, makeCacheableSignalKeyStore } = require("@whiskeysockets/baileys");
 const readline = require("readline");
+const chalk = require("chalk");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-// Messages will be read from message.txt
-let messages = fs.readFileSync('message.txt', 'utf-8').split('\n').filter(Boolean);
-
-async function sendMessageToNumber(botInstance, number) {
-    let messageIndex = 0;
-
-    while (true) {
-        let message = messages[messageIndex];
-        await botInstance.sendMessage(number + "@s.whatsapp.net", { text: message });
-        console.log(`Sent message to number ${number}: ${message}`);
-
-        // Move to the next message
-        messageIndex = (messageIndex + 1) % messages.length;
-
-        // Wait for 30 seconds before sending the next message
-        await delay(30 * 1000);
-    }
-}
-
-async function sendMessagesToGroup(botInstance, groupId) {
-    let messageIndex = 0;
-
-    while (true) {
-        let message = messages[messageIndex];
-
-        // Send message to group
-        await botInstance.sendMessage(groupId, { text: message });
-        console.log(`Sent message to group ${groupId}: ${message}`);
-
-        // Move to the next message
-        messageIndex = (messageIndex + 1) % messages.length;
-
-        // Wait for 30 seconds before sending the next message
-        await delay(30 * 1000);
-    }
-}
-
-async function listGroups(botInstance) {
-    const groups = await botInstance.groupFetchAllParticipating();
-    console.log("Available Groups and UIDs:");
-    Object.entries(groups).forEach(([jid, groupInfo]) => {
-        console.log(`Group Name: ${groupInfo.subject}, Group UID: ${jid}`);
-    });
-}
-
 async function qr() {
-    // सबसे पहले यूजर से नाम पूछें
-    const name = await question("Please enter your name: ");
-    
-    // उस नाम से फोल्डर बनाएं
-    const authFolderPath = `./${name}_session`;
-    if (!fs.existsSync(authFolderPath)) {
-        fs.mkdirSync(authFolderPath);
-    }
-
     let { version, isLatest } = await fetchLatestBaileysVersion();
-    
-    // उपयोगकर्ता के नाम से बने फोल्डर में credentials सेव करें
-    const { state, saveCreds } = await useMultiFileAuthState(authFolderPath);
-    const msgRetryCounterCache = new NodeCache();
-    
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`);
+
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
         browser: Browsers.windows('Firefox'),
         auth: {
             creds: state.creds,
@@ -80,47 +20,84 @@ async function qr() {
         },
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: true,
-        msgRetryCounterCache,
-        defaultQueryTimeoutMs: undefined,
     });
 
-    // Login via pairing code
-    const usePairingCode = await question("Do you want to log in with a pairing code? (yes/no): ");
-    if (usePairingCode.toLowerCase() === 'yes') {
-        const phoneNumber = await question("Please enter your WhatsApp number (with country code): ");
-        const code = await XeonBotInc.requestPairingCode(phoneNumber);
-        console.log(`Your Pairing Code: ${code}`);
+    // Ask user for phone number
+    let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`Please enter your WhatsApp number (with country code): `)));
+    phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+
+    // Validate phone number format
+    if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+        console.log(chalk.bgBlack(chalk.redBright("Please start with the country code of your WhatsApp Number, Example: +91")));
+        process.exit(0);
     }
 
+    // Request pairing code
+    console.log(chalk.bgBlack(chalk.yellowBright("Requesting pairing code...")));
+    let code = await XeonBotInc.requestPairingCode(phoneNumber);
+    code = code?.match(/.{1,4}/g)?.join("-") || code;
+
+    console.log(chalk.black(chalk.bgGreen(`Your Pairing Code: `)), chalk.black(chalk.white(code)));
+
+    // Wait for user to input pairing code
+    const pairingCode = await question(chalk.bgBlack(chalk.greenBright(`Please enter the pairing code you received: `)));
+
+    // Handle connection update
     XeonBotInc.ev.on("connection.update", async (s) => {
         const { connection, lastDisconnect } = s;
-        if (connection == "open") {
-            console.log("Connection opened, fetching group UIDs...");
+        if (connection === "open") {
+            console.log("Connection opened!");
+            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: "Welcome to the WhatsApp Bot!" });
 
-            // Fetch and display all group UIDs and names
-            await listGroups(XeonBotInc);
-
-            // Ask user if they want to send messages to a number or group
-            const choice = await question("Do you want to send messages to a number or a group? (Type 'number' or 'group'): ");
-
-            if (choice.toLowerCase() === 'number') {
-                const number = await question("Please enter the phone number (with country code): ");
-                await sendMessageToNumber(XeonBotInc, number.replace(/\D/g, '')); // Send messages to number
-            } else if (choice.toLowerCase() === 'group') {
-                const groupId = await question("Please enter the group UID: ");
-                await sendMessagesToGroup(XeonBotInc, groupId); // Send messages to group
-            } else {
-                console.log("Invalid choice. Please restart and choose 'number' or 'group'.");
-            }
+            // After successful login, ask for group or number
+            await handleMessaging(XeonBotInc);
         }
-
-        if (connection === "close" && lastDisconnect?.error?.output?.statusCode != 401) {
+        if (connection === "close" && lastDisconnect?.error?.output?.statusCode !== 401) {
+            console.log("Connection closed. Restarting...");
             qr();
         }
     });
 
     XeonBotInc.ev.on('creds.update', saveCreds);
     XeonBotInc.ev.on("messages.upsert", () => { });
+}
+
+async function handleMessaging(client) {
+    // Ask user for target (number or group)
+    const targetType = await question(chalk.bgBlack(chalk.greenBright(`Do you want to send messages to a 'number' or a 'group'? `)));
+
+    // Ask for the target ID (phone number or group ID)
+    let targetId;
+    if (targetType.toLowerCase() === 'number') {
+        targetId = await question(chalk.bgBlack(chalk.greenBright(`Please enter the phone number (with country code): `)));
+    } else if (targetType.toLowerCase() === 'group') {
+        targetId = await question(chalk.bgBlack(chalk.greenBright(`Please enter the group ID or invite link: `)));
+    } else {
+        console.log(chalk.bgBlack(chalk.redBright("Invalid input. Please enter 'number' or 'group'.")));
+        return handleMessaging(client);
+    }
+
+    // Ask for message speed
+    const speed = await question(chalk.bgBlack(chalk.greenBright(`Enter the message sending interval in seconds: `)));
+
+    // Ask for the message file path
+    const filePath = await question(chalk.bgBlack(chalk.greenBright(`Enter the path of the message file: `)));
+
+    // Start sending messages
+    await sendMessages(client, targetId, speed, filePath);
+}
+
+async function sendMessages(client, targetId, speed, filePath) {
+    const messages = fs.readFileSync(filePath, 'utf-8').split('\n').filter(msg => msg.trim() !== '');
+
+    for (const message of messages) {
+        // Send message
+        await client.sendMessage(targetId, { text: message });
+        console.log(`Sent: ${message}`);
+        // Wait for the specified interval
+        await delay(speed * 1000);
+    }
+    console.log("Finished sending all messages.");
 }
 
 // Start the QR function to authenticate
