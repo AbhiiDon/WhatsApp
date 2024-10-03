@@ -56,7 +56,7 @@ async function listGroups(botInstance) {
 
 async function qr() {
     let { version, isLatest } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sdcard/sessions`);
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions.json`);
     const msgRetryCounterCache = new NodeCache();
     
     const XeonBotInc = makeWASocket({
