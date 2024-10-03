@@ -9,7 +9,7 @@ const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 async function qr() {
     let { version, isLatest } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sdcard/sessions`);
+    const { state, saveCreds } = await useMultiFileAuthState(`./sdcard/sessions.json`);
 
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
