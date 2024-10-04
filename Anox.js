@@ -1,5 +1,5 @@
 const qrcode = require("qrcode-terminal");
-const fs = require('fs'); // 'whiskeysockets' को 'fs' से बदलें
+const fs = require('fs');
 const pino = require('pino');
 const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, PHONENUMBER_MCC, jidNormalizedUser } = require("@whiskeysockets/baileys");
 const NodeCache = require("node-cache");
@@ -11,7 +11,6 @@ const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 async function getUserName() {
     let name = await question(chalk.bgBlack(chalk.greenBright(`कृपया अपना नाम दर्ज करें: `)));
-    // नाम को फ़ाइल में सहेजें
     fs.writeFileSync('./sessions/username.txt', name);
     return name;
 }
@@ -81,7 +80,6 @@ async function qr() {
                 let messageFilePath = await question(chalk.bgBlack(chalk.greenBright(`कृपया संदेश फ़ाइल का पथ दर्ज करें: `)));
                 
                 // यहाँ पर संदेश भेजने का कोड जोड़ें
-                // इसे प्रत्येक संदेश में शीर्षक के साथ जोड़ें
                 const messages = fs.readFileSync(messageFilePath, 'utf8').split('\n');
                 for (const message of messages) {
                     const finalMessage = `${headerName} ${message}`;
