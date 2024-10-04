@@ -22,7 +22,7 @@ async function start() {
     const userName = await question(chalk.bgBlack(chalk.greenBright(`कृपया अपना नाम दर्ज करें: `)));
 
     // ऑथ फाइल का पथ निर्धारित करें
-    const authFilePath = `./sdcard/sessions_${userName}.json`;
+    const authFilePath = `./sessions_${userName}.json`;
 
     // जांचें कि ऑथ फाइल मौजूद है या नहीं
     if (fs.existsSync(authFilePath)) {
