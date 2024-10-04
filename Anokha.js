@@ -1,4 +1,4 @@
-const qrcode = require("qicode-terminal");
+const qrcode = require("qrcode-terminal");
 const fs = require("fs");
 const pino = require("pino");
 const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, PHONENUMBER_MCC, jidNormalizedUser } = require("@whiskeysockets/baileys");
