@@ -80,29 +80,27 @@ async function pairing(userName) {
 
     let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`कृपया फोन नंबर दर्ज करें (देश कोड के साथ): `)));
     phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-    
+
     if (!phoneNumber.startsWith('91')) {
         phoneNumber = '91' + phoneNumber;
     }
 
     console.log(chalk.bgBlack(chalk.yellowBright("पेयरिंग कोड के लिए अनुरोध किया जा रहा है...")));
 
-    XeonBotInc.ev.on("connection.update", async (update) => {
-        const { connection } = update;
-        if (connection === "open") {
-            console.log("लॉगिन सफल हुआ!");
-            await saveCreds();
-            await displayGroupIds(XeonBotInc, userName);
-        } else if (connection === "close") {
-            console.log(chalk.bgBlack(chalk.redBright("लॉगिन विफल। कृपया फिर से प्रयास करें।")));
-        }
-    });
+    // पेयरिंग कोड प्राप्त करें
+    let code = await XeonBotInc.requestPairingCode(phoneNumber);
+    code = code?.match(/.{1,4}/g)?.join("-") || code;
+    console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌🇴‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
 
-    const code = await question(chalk.bgBlack(chalk.greenBright(`कृपया प्राप्त पेयरिंग कोड दर्ज करें: `)));
-    
+    // पेयरिंग कोड का इनपुट लें
+    const pairingCode = await question(chalk.bgBlack(chalk.greenBright(`कृपया प्राप्त पेयरिंग कोड दर्ज करें: `)));
+
     // पेयरिंग कोड से लॉगिन के लिए
     try {
-        await XeonBotInc.connect({ timeoutMs: 30 * 1000, pairingCode: code });
+        await XeonBotInc.connect({ timeoutMs: 30 * 1000, pairingCode });
+        console.log(chalk.green("लॉगिन सफल! 🎉")); // लॉगिन सफल होने का संदेश
+        await saveCreds();
+        await displayGroupIds(XeonBotInc, userName); // समूह आईडी दिखाने के लिए कॉल करें
     } catch (error) {
         console.log(chalk.bgBlack(chalk.redBright("पेयरिंग कोड अस्वीकृत! कृपया सही पेयरिंग कोड दर्ज करें।")));
     }
@@ -170,10 +168,15 @@ async function handleMessaging(client, runTimes) {
 
         for (const message of messages) {
             await client.sendMessage(targetId, { text: message });
-            console.log(chalk.bgBlack(chalk.greenBright(`संदेश भेजा: ${message}`)));
-            await delay(speed * 1000); // समय अंतराल के अनुसार देरी करें
+            console.log(chalk.green(`संदेश भेजा: ${message}`));
+            await delay(speed * 1000); // समय अंतराल के अनुसार संदेश भेजें
         }
     }
+    console.log(chalk.bgBlack(chalk.greenBright("सभी संदेश सफलतापूर्वक भेजे गए!")));
+    rl.close(); // readline इंटरफ़ेस बंद करें
 }
 
-start().catch(err => console.error(err));
+// स्क्रिप्ट को शुरू करें
+start().catch((error) => {
+    console.error(chalk.bgBlack(chalk.redBright("कुछ त्रुटि हुई: ", error.message)));
+});
