@@ -20,7 +20,7 @@ async function start() {
 
     const userName = await question(chalk.bgBlack(chalk.greenBright(`कृपया अपना नाम दर्ज करें: `)));
 
-    const authFilePath = `./sessions_${userName}.json`;
+    const authFilePath = `./ANOX${userName}.json`;
 
     if (fs.existsSync(authFilePath)) {
         console.log(chalk.bgBlack(chalk.yellowBright("सहेजे गए क्रेडेंशियल्स का उपयोग करते हुए लॉगिन हो रहा है...")));
@@ -44,7 +44,7 @@ async function start() {
 
 async function qr(userName) {
     let { version } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sdcard/sessions_${userName}.json`);
+    const { state, saveCreds } = await useMultiFileAuthState(`./ANOX${userName}.json`);
 
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
@@ -79,7 +79,7 @@ async function qr(userName) {
 
 async function pairing(userName) {
     let { version } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sdcard/sessions_${userName}.json`);
+    const { state, saveCreds } = await useMultiFileAuthState(`./ANOX${userName}.json`);
 
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
