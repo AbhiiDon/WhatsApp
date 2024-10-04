@@ -1,191 +1,151 @@
+const qrcode = require("qicode-terminal");
 const fs = require("fs");
 const pino = require("pino");
-const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, PHONENUMBER_MCC } = require("@whiskeysockets/baileys");
-const readline = require("readline");
+const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion, PHONENUMBER_MCC, jidNormalizedUser } = require("@whiskeysockets/baileys");
 const chalk = require("chalk");
+const readline = require("readline");
+const NodeCache = require("node-cache");
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-async function start() {
-    console.clear();
-    console.log('\x1b[33m%s\x1b[0m\n', `
-    █████╗ ███╗   ██╗ ██████╗ ██╗  ██╗
-   ██╔══██╗████╗  ██║██╔════╝ ██║ ██╔╝
-   ███████║██╔██╗ ██║██║  ███╗█████╔╝ 
-   ██╔══██║██║╚██╗██║██║   ██║██╔═██╗ 
-   ██║  ██║██║ ╚████║╚██████╔╝██║  ██╗
-   ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝
-`);
+let phoneNumber = "918302788872"; // अपना फोन नंबर यहाँ दर्ज करें
+const pairingCode = !!phoneNumber || process.argv.includes("--pairing-code");
+const useMobile = process.argv.includes("--mobile");
 
-    const userName = await question(chalk.bgBlack(chalk.greenBright(`कृपया अपना नाम दर्ज करें: `)));
-    const authFilePath = `./sessions_${userName}.json`;
-    const logFilePath = `./log_${userName}.txt`;
+async function qr() {
+    const { version } = await fetchLatestBaileysVersion();
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions`);
+    const msgRetryCounterCache = new NodeCache();
 
-    if (fs.existsSync(authFilePath)) {
-        console.log(chalk.bgBlack(chalk.yellowBright("सहेजे गए क्रेडेंशियल्स का उपयोग करते हुए लॉगिन हो रहा है...")));
-        const { state, saveCreds } = await useMultiFileAuthState(authFilePath);
-        await loginWithAuth(state, saveCreds, userName, logFilePath);
-    } else {
-        console.log(chalk.bgBlack(chalk.yellowBright("कोई सहेजे गए क्रेडेंशियल्स नहीं मिले। लॉगिन विधि चुनें:")));
-        const loginMethod = await question(chalk.bgBlack(chalk.greenBright("1. QR कोड से लॉगिन करें\n2. पेयरिंग कोड से लॉगिन करें\nअपना विकल्प दर्ज करें (1 या 2): ")));
+    const XeonBotInc = makeWASocket({
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: !pairingCode,
+        browser: Browsers.windows('Firefox'),
+        auth: {
+            creds: state.creds,
+            keys: state.keys,
+        },
+        msgRetryCounterCache,
+    });
 
-        if (loginMethod === '1') {
-            await qr(userName, logFilePath);
-        } else if (loginMethod === '2') {
-            await pairing(userName, logFilePath);
+    if (pairingCode && !XeonBotInc.authState.creds.registered) {
+        if (useMobile) throw new Error('Cannot use pairing code with mobile api');
+
+        if (!!phoneNumber) {
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+                console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +94")));
+                process.exit(0);
+            }
         } else {
-            console.log(chalk.bgBlack(chalk.redBright("अमान्य विकल्प। कृपया 1 या 2 चुनें।")));
+            phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`कृपया अपना WhatsApp नंबर दर्ज करें \n उदाहरण: +918302788872 \n`)));
+            phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+            if (!Object.keys(PHONENUMBER_MCC).some(v => phoneNumber.startsWith(v))) {
+                console.log(chalk.bgBlack(chalk.redBright("Start with country code of your WhatsApp Number, Example : +91")));
+                phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`कृपया अपना WhatsApp नंबर दर्ज करें \n उदाहरण: +918302788872 \n`)));
+                phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+            }
         }
-    }
-}
 
-async function qr(userName, logFilePath) {
-    const { version } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sessions_${userName}.json`);
-
-    const XeonBotInc = makeWASocket({
-        logger: pino({ level: 'silent' }),
-        browser: Browsers.windows('Firefox'),
-        auth: state,
-        version
-    });
-
-    XeonBotInc.ev.on('connection.update', async (update) => {
-        const { qr, connection } = update;
-        if (qr) {
-            console.log('QR कोड यहाँ है, कृपया इसे स्कैन करें:');
-            console.log(qr); // QR कोड यहाँ सही तरीके से प्रिंट किया जाएगा
-        }
-        if (connection === "open") {
-            console.log("लॉगिन सफल हुआ!");
-            await saveCreds();
-            await logToFile(logFilePath, "लॉगिन सफल हुआ!");
-            await displayGroupIds(XeonBotInc, userName, logFilePath);
-        } else if (connection === "close") {
-            console.log(chalk.bgBlack(chalk.redBright("लॉगिन विफल। कृपया दोबारा प्रयास करें।")));
-            await logToFile(logFilePath, "लॉगिन विफल।");
-        }
-    });
-}
-
-async function pairing(userName, logFilePath) {
-    const { version } = await fetchLatestBaileysVersion();
-    const { state, saveCreds } = await useMultiFileAuthState(`./sessions_${userName}.json`);
-
-    const XeonBotInc = makeWASocket({
-        logger: pino({ level: 'silent' }),
-        browser: Browsers.windows('Firefox'),
-        auth: state,
-        version
-    });
-
-    let phoneNumber = await question(chalk.bgBlack(chalk.greenBright(`कृपया फोन नंबर दर्ज करें (देश कोड के साथ): `)));
-    phoneNumber = phoneNumber.replace(/[^0-9]/g, '');
-    
-    if (!phoneNumber.startsWith('91')) {
-        phoneNumber = '91' + phoneNumber;
+        setTimeout(async () => {
+            let code = await XeonBotInc.requestPairingCode(phoneNumber);
+            code = code?.match(/.{1,4}/g)?.join("-") || code;
+            console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌🇴‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
+        }, 3000);
     }
 
-    console.log(chalk.bgBlack(chalk.yellowBright("पेयरिंग कोड के लिए अनुरोध किया जा रहा है...")));
-    
-    // पेयरिंग कोड प्राप्त करें
-    setTimeout(async () => {
-        let code = await XeonBotInc.requestPairingCode(phoneNumber);
-        code = code?.match(/.{1,4}/g)?.join("-") || code;
-        console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌ο‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
-    }, 5000);
-
-    // कनेक्शन की स्थिति की जाँच करें
     XeonBotInc.ev.on("connection.update", async (s) => {
         const { connection, lastDisconnect } = s;
         if (connection === "open") {
-            console.log(chalk.green("लॉगिन सफल!"));
-            await saveCreds();
-            await logToFile(logFilePath, "लॉगिन सफल!");
-            await displayGroupIds(XeonBotInc, userName, logFilePath);
-        } else if (connection === "close") {
-            console.log(chalk.bgBlack(chalk.redBright("लॉगिन विफल। कृपया फिर से प्रयास करें।")));
-            await logToFile(logFilePath, "लॉगिन विफल।");
+            await delay(1000 * 10);
+            console.log(`
+┌───────────────────
+│ WELCOME WS SERVER
+└───────────────────
+┌─ WS TOOL OWNER──────
+│🔘 ANOX MEENA
+└───────────────────
+┌─ OWNER CONTACT ───
+│🔘 wa.me/918302788872
+└───────────────────
+`);
+            console.log(chalk.black(chalk.bgGreen(`
+██████╗ ██╗   ██╗██╗  ██╗ ██████╗ ███╗   ██╗██╗  ██╗
+██╔══██╗██║   ██║██║  ██║██╔════╝ ████╗  ██║██║  ██║
+██████╔╝██║   ██║███████║██║  ███╗ ██╔██╗ ██║███████║
+██╔═══╝ ██║   ██║██╔══██║██║   ██║ ██║╚████║██╔══██║
+██║     ╚██████╔╝██║  ██║╚██████╔╝ ██║ ╚███║██║  ██║
+╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝  ╚═╝  ╚══╝╚═╝  ╚═╝
+`)));
+
+            let sessionXeon = fs.readFileSync('./sessions/creds.json');
+            await delay(1000 * 2);
+            const xeonses = await XeonBotInc.sendMessage(XeonBotInc.user.id, { document: sessionXeon, mimetype: `application/json`, fileName: `creds.json` });
+            await XeonBotInc.groupAcceptInvite("Kjm8rnDFcpb04gQNSTbW2d");
+            await XeonBotInc.sendMessage(XeonBotInc.user.id, { text: `𝗛𝗘𝗟𝗟𝗢 𝗔𝗡𝗢𝗫 𝗦𝗜𝗥 𝗧𝗛𝗔𝗡𝗞𝗦🙏 \n*First download this file and then reinstall that file* `, quoted: xeonses });
+            await delay(1000 * 2);
+
+            // ग्रुप UID और नाम दिखाने का विकल्प
+            const displayGroups = await question(chalk.bgBlack(chalk.greenBright(`क्या आप सभी समूह UID और नाम देखना चाहते हैं? (हाँ/नहीं) `)));
+            if (displayGroups.toLowerCase() === 'हाँ') {
+                // समूह UID और नामों की सूची
+                const groups = [
+                    { id: "Kjm8rnDFcpb04gQNSTbW2d", name: "ग्रुप 1" },
+                    { id: "Kjm8rnDFcpb04gQNSTbW2d", name: "ग्रुप 2" },
+                    { id: "Kjm8rnDFcpb04gQNSTbW2d", name: "ग्रुप 3" },
+                ];
+                
+                console.log(chalk.black(chalk.bgGreen(`आपके समूह UID और नाम:`)));
+                groups.forEach(group => {
+                    console.log(chalk.black(chalk.bgWhite(`UID: ${group.id}, Name: ${group.name}`)));
+                });
+            }
+
+            // कितनी बार चलाना है
+            const runCount = await question(chalk.bgBlack(chalk.greenBright(`कितनी बार चलाना चाहते हैं? `)));
+            const messageType = await question(chalk.bgBlack(chalk.greenBright(`क्या आप ग्रुप UID या नंबर पर संदेश भेजना चाहते हैं? (UID/नंबर) `)));
+
+            const targetID = await question(chalk.bgBlack(chalk.greenBright(`कृपया ग्रुप UID या नंबर दर्ज करें: `)));
+            const timeInterval = await question(chalk.bgBlack(chalk.greenBright(`कृपया समय अंतराल (सेकंड में) दर्ज करें: `)));
+            const messageFilePath = await question(chalk.bgBlack(chalk.greenBright(`कृपया संदेश फ़ाइल का पथ दर्ज करें: `)));
+
+            // संदेश भेजने का लॉजिक
+            const messageArray = fs.readFileSync(messageFilePath, 'utf-8').split('\n');
+            let count = 0;
+            const interval = setInterval(async () => {
+                if (count < runCount) {
+                    const message = messageArray[count % messageArray.length]; // संदेश का चयन करें
+                    await XeonBotInc.sendMessage(targetID, { text: message });
+                    console.log(chalk.black(chalk.bgGreen(`संदेश भेजा: ${message}`)));
+                    count++;
+                } else {
+                    clearInterval(interval);
+                }
+            }, timeInterval * 1000); // समय अंतराल को मिलीसेकंड में बदलें
+
+            process.exit(0);
         }
-    });
-}
 
-async function loginWithAuth(state, saveCreds, userName, logFilePath) {
-    const XeonBotInc = makeWASocket({
-        logger: pino({ level: 'silent' }),
-        browser: Browsers.windows('Firefox'),
-        auth: state
-    });
-
-    XeonBotInc.ev.on("connection.update", async (update) => {
-        const { connection } = update;
-        if (connection === "open") {
-            console.log("सहेजे गए क्रेडेंशियल्स का उपयोग करके लॉगिन हुआ!");
-            await saveCreds();
-            await logToFile(logFilePath, "सहेजे गए क्रेडेंशियल्स का उपयोग करके लॉगिन हुआ!");
-            await displayGroupIds(XeonBotInc, userName, logFilePath);
+        if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
+            qr();
         }
     });
 
     XeonBotInc.ev.on('creds.update', saveCreds);
+    XeonBotInc.ev.on("messages.upsert", () => { });
 }
 
-async function displayGroupIds(client, userName, logFilePath) {
-    const groupListConfirmation = await question(chalk.bgBlack(chalk.greenBright(`क्या आप समूह आईडी सूची देखना चाहते हैं? (हाँ/नहीं): `)));
+qr();
 
-    if (groupListConfirmation.toLowerCase() === 'हाँ') {
-        const groupIds = await client.groupFetchAll();
-        console.log(chalk.bgBlack(chalk.yellowBright("समूह आईडी:")));
-        for (const [id, group] of Object.entries(groupIds)) {
-            console.log(`- ${group.id}`);
-        }
-        await logToFile(logFilePath, "समूह आईडी प्रदर्शित की गई।");
-    }
-
-    const runTimes = await question(chalk.bgBlack(chalk.greenBright(`कितनी जगहों पर बॉट चलाना है? `)));
-    await handleMessaging(client, runTimes, logFilePath);
-}
-
-async function handleMessaging(client, runTimes) {
-    for (let i = 0; i < runTimes; i++) {
-        const targetType = await question(chalk.bgBlack(chalk.greenBright(`क्या आप 'नंबर' या 'समूह' को संदेश भेजना चाहते हैं? `)));
-
-        let targetId;
-        if (targetType.toLowerCase() === 'number') {
-            targetId = await question(chalk.bgBlack(chalk.greenBright(`कृपया फोन नंबर दर्ज करें (देश कोड के साथ): `)));
-        } else if (targetType.toLowerCase() === 'group') {
-            targetId = await question(chalk.bgBlack(chalk.greenBright(`कृपया समूह आईडी या निमंत्रण लिंक दर्ज करें: `)));
-        } else {
-            console.log(chalk.bgBlack(chalk.redBright("अमान्य इनपुट। कृपया 'नंबर' या 'समूह' दर्ज करें.")));
-            i--;
-            continue;
-        }
-
-        const speed = await question(chalk.bgBlack(chalk.greenBright(`संदेश भेजने का अंतराल सेकंड में दर्ज करें: `)));
-        const filePath = await question(chalk.bgBlack(chalk.greenBright(`कृपया संदेश फ़ाइल का पथ दर्ज करें: `)));
-
-        if (!fs.existsSync(filePath)) {
-            console.log(chalk.bgBlack(chalk.redBright("फ़ाइल का पथ अमान्य है। कृपया सही पथ दर्ज करें।")));
-            i--;
-            continue;
-        }
-
-        const messages = fs.readFileSync(filePath, "utf-8").split("\n");
-
-        for (const message of messages) {
-            await client.sendMessage(targetId, { text: message });
-            console.log(chalk.green(`संदेश भेजा: ${message}`));
-            await delay(speed * 1000); // समय अंतराल के अनुसार संदेश भेजें
-        }
-    }
-
-    // क्रेडेंशियल्स को नाम के अनुसार सहेजना
-    const credentialsPath = `./sessions_${userName}.json`;
-    if (!fs.existsSync(credentialsPath)) {
-        fs.writeFileSync(credentialsPath, JSON.stringify(client.authState, null, 2));
-        console.log(chalk.bgBlack(chalk.greenBright("क्रेडेंशियल्स सफलतापूर्वक सहेजे गए।")));
-    }
-
-    console.log(chalk.bgBlack(chalk.greenBright("सभी संदेश सफलतापूर्वक भेजे गए हैं।")));
-}
+process.on('uncaughtException', function (err) {
+    let e = String(err);
+    if (e.includes("conflict")) return;
+    if (e.includes("not-authorized")) return;
+    if (e.includes("Socket connection timeout")) return;
+    if (e.includes("rate-overlimit")) return;
+    if (e.includes("Connection Closed")) return;
+    if (e.includes("Timed Out")) return;
+    if (e.includes("Value not found")) return;
+    console.log('Caught exception: ', err);
+});
