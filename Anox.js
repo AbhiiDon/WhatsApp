@@ -48,8 +48,13 @@ async function qr() {
     });
 
     // पेयरिंग कोड प्राप्त करें
-    const code = await XeonBotInc.requestPairingCode(phoneNumber);
-    console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌🇴‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
+    try {
+        const code = await XeonBotInc.requestPairingCode(phoneNumber);
+        console.log(chalk.black(chalk.bgGreen(`🇾‌🇴‌🇺‌🇷‌ 🇵‌🇦‌🇮‌🇷‌🇮‌🇳‌🇬‌ 🇨‌🇴‌🇩‌🇪‌ :-  `)), chalk.black(chalk.white(code)));
+    } catch (error) {
+        console.error(chalk.red("पेयरिंग कोड प्राप्त करने में त्रुटि: "), error);
+        return;
+    }
 
     XeonBotInc.ev.on("connection.update", async (s) => {
         const { connection, lastDisconnect } = s;
