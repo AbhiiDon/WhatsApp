@@ -1,3 +1,4 @@
+const qrcode = require("qrcode-terminal")
 const fs = require("fs");
 const pino = require("pino");
 const { default: makeWASocket, Browsers, delay, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
@@ -54,7 +55,7 @@ async function qr(userName) {
         const { qr, connection } = update;
         if (qr) {
             console.log('QR कोड यहाँ है, कृपया इसे स्कैन करें:');
-            console.log(qr);
+            console.log(qr); // QR कोड यहाँ सही तरीके से प्रिंट किया जाएगा
         }
         if (connection === "open") {
             console.log("लॉगिन सफल हुआ!");
@@ -85,10 +86,7 @@ async function pairing(userName) {
     }
 
     console.log(chalk.bgBlack(chalk.yellowBright("पेयरिंग कोड के लिए अनुरोध किया जा रहा है...")));
-    
-    const pairingCode = await question(chalk.bgBlack(chalk.greenBright(`कृपया प्राप्त पेयरिंग कोड दर्ज करें: `)));
 
-    // पेयरिंग कोड से लॉगिन करने के लिए कोड
     XeonBotInc.ev.on("connection.update", async (update) => {
         const { connection } = update;
         if (connection === "open") {
@@ -100,9 +98,11 @@ async function pairing(userName) {
         }
     });
 
+    const code = await question(chalk.bgBlack(chalk.greenBright(`कृपया प्राप्त पेयरिंग कोड दर्ज करें: `)));
+    
     // पेयरिंग कोड से लॉगिन के लिए
     try {
-        await XeonBotInc.connect({ timeoutMs: 30 * 1000, pairingCode });
+        await XeonBotInc.connect({ timeoutMs: 30 * 1000, pairingCode: code });
     } catch (error) {
         console.log(chalk.bgBlack(chalk.redBright("पेयरिंग कोड अस्वीकृत! कृपया सही पेयरिंग कोड दर्ज करें।")));
     }
