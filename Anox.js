@@ -14,7 +14,7 @@ async function qr() {
 
     const XeonBotInc = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
+        printQRInTerminal: false,
         browser: Browsers.macOS('Safari'),
         auth: {
             creds: state.creds,
