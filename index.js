@@ -42,7 +42,7 @@ async function sendMessagesToGroup(botInstance, groupId) {
         messageIndex = (messageIndex + 1) % messages.length;
 
         // Wait for 30 seconds before sending the next message
-        await delay(30 * 1000);
+        await delay(0 * 1000);
     }
 }
 
